@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# balevibe.git — helper script to initialize & push BaleVibe repo to GitHub
+# Place at the repository root (same level as setup.py and README.md)
+# Usage:
+#   1) Make executable: chmod +x balevibe.git
+#   2) Run: ./balevibe.git
+# Optional env vars:
+#   GITHUB_USER - your GitHub username
+#   REPO_NAME   - repository name (default: balevibe)
+#   CREATE_PUBLIC - "yes" to create public repo via gh (default yes)
+
+set -euo pipefail
+
+REPO_NAME="${REPO_NAME:-balevibe}"
+GITHUB_USER="${GITHUB_USER:-}"
+CREATE_PUBLIC="${CREATE_PUBLIC:-yes}"
+MAIN_BRANCH="${MAIN_BRANCH:-main}"
+
+echo "== balevibe.git helper =="
+echo "Repo name: $REPO_NAME"
+if [ -n "$GITHUB_USER" ]; then
+  echo "GitHub user: $GITHUB_USER"
+fi
+
+# 1) init git if not initialized
+if [ ! -d .git ]; then
+  echo "--> git not initialized. Initializing..."
+  git init
+  git checkout -b "$MAIN_BRANCH" || true
+else
+  echo "--> git already initialized."
+fi
+
+# 2) add files and commit (only if there are changes)
+git add -A
+if git diff --cached --quiet; then
+  echo "--> nothing to commit (index clean)."
+else
+  git commit -m "Initial commit — BaleVibe"
+  echo "--> committed changes."
+fi
+
+# 3) try to create remote using gh (recommended)
+if command -v gh >/dev/null 2>&1; then
+  echo "--> GitHub CLI found."
+  if [ -z "$GITHUB_USER" ]; then
+    # try to get gh user
+    GITHUB_USER="$(gh api user --jq .login 2>/dev/null || true)"
+  fi
+
+  if [ -z "$GITHUB_USER" ]; then
+    echo "   Could not detect GitHub username. You can set GITHUB_USER env var."
+    read -p "Enter GitHub username (or leave blank to skip gh create): " GITHUB_USER
+  fi
+
+  if [ -n "$GITHUB_USER" ]; then
+    # create repo via gh (skip if remote origin exists)
+    if git remote get-url origin >/dev/null 2>&1; then
+      echo "--> remote 'origin' already exists: $(git remote get-url origin)"
+    else
+      if [ "$CREATE_PUBLIC" = "yes" ]; then
+        echo "--> Creating repo $GITHUB_USER/$REPO_NAME (public) via gh..."
+        gh repo create "$GITHUB_USER/$REPO_NAME" --public --source=. --remote=origin --push || {
+          echo "   gh create failed — you may already have a repo with that name."
+        }
+      else
+        echo "--> Creating repo $GITHUB_USER/$REPO_NAME (private) via gh..."
+        gh repo create "$GITHUB_USER/$REPO_NAME" --private --source=. --remote=origin --push || {
+          echo "   gh create failed — you may already have a repo with that name."
+        }
+      fi
+    fi
+  fi
+else
+  echo "--> gh (GitHub CLI) not found. Skipping automatic repo creation."
+fi
+
+# 4) if origin missing, ask for remote URL (HTTPS or SSH) and push
+if ! git remote get-url origin >/dev/null 2>&1; then
+  echo
+  echo "No 'origin' remote configured."
+  read -p "Enter remote URL to add as origin (e.g. https://github.com/you/$REPO_NAME.git or git@github.com:you/$REPO_NAME.git): " REMOTE_URL
+  if [ -n "$REMOTE_URL" ]; then
+    git remote add origin "$REMOTE_URL"
+    echo "--> remote origin set to $REMOTE_URL"
+  else
+    echo "No remote given. Exiting (you can add remote later with 'git remote add origin <url>')."
+    exit 0
+  fi
+fi
+
+echo "--> Pushing to origin/$MAIN_BRANCH..."
+git push -u origin "$MAIN_BRANCH"
+
+# 5) optional tag / release
+read -p "Do you want to create a v0.1.0 tag and push it? (y/N): " TAG_ANS
+if [[ "$TAG_ANS" =~ ^[Yy]$ ]]; then
+  git tag v0.1.0
+  git push origin v0.1.0
+  echo "--> Tag v0.1.0 created and pushed."
+fi
+
+echo "Done. Repository should be available on GitHub if remote was reachable."
